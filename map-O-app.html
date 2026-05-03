@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Intelligent Octopus // TACTICAL MAP</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --green: #00ff88;
+    --green-dim: #00cc66;
+    --green-glow: rgba(0,255,136,0.18);
+    --red: #ff3333;
+    --amber: #ffaa00;
+    --bg: #020a05;
+    --surface: rgba(0,20,10,0.92);
+    --border: rgba(0,255,136,0.25);
+    --text: #00ff88;
+    --text-dim: rgba(0,255,136,0.5);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    font-family: 'Share Tech Mono', monospace;
+    height: 100%; width: 100%;
+    overflow: hidden;
+    background: var(--bg);
+    cursor: crosshair;
+  }
+
+  /* ── MAP ── */
+  #map {
+    width: 100%; height: 100%;
+    position: absolute; top: 0; left: 0;
+    filter: saturate(0) brightness(0.6) sepia(1) hue-rotate(90deg) brightness(0.7);
+  }
+
+  /* Scan line overlay */
+  body::before {
+    content: '';
+    position: fixed; inset: 0; z-index: 5;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.07) 2px,
+      rgba(0,0,0,0.07) 4px
+    );
+    pointer-events: none;
+  }
+
+  /* CRT vignette */
+  body::after {
+    content: '';
+    position: fixed; inset: 0; z-index: 6;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.75) 100%);
+    pointer-events: none;
+  }
+
+  /* ── HEADER ── */
+  .header {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 18px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    backdrop-filter: blur(8px);
+  }
+
+  .logo {
+    font-family: 'Orbitron', monospace;
+    font-weight: 900;
+    font-size: clamp(13px, 2.5vw, 18px);
+    color: var(--green);
+    letter-spacing: 4px;
+    text-shadow: 0 0 12px var(--green);
+    white-space: nowrap;
+  }
+
+  .logo span {
+    color: var(--text-dim);
+    font-weight: 400;
+    font-size: 0.55em;
+    letter-spacing: 3px;
+    display: block;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    font-size: 10px;
+    color: var(--text-dim);
+  }
+
+  .status-dot {
+    display: inline-block;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 8px var(--green);
+    animation: blink 1.4s infinite;
+    margin-right: 5px;
+  }
+
+  @keyframes blink {
+    0%,100% { opacity: 1; }
+    50% { opacity: 0.2; }
+  }
+
+  .clock { color: var(--green); font-size: 12px; letter-spacing: 2px; }
+
+  /* ── CORNER BRACKETS ── */
+  .corner {
+    position: absolute;
+    width: 22px; height: 22px;
+    z-index: 50;
+    pointer-events: none;
+  }
+  .corner.tl { top: 54px; left: 8px; border-top: 2px solid var(--green); border-left: 2px solid var(--green); }
+  .corner.tr { top: 54px; right: 8px; border-top: 2px solid var(--green); border-right: 2px solid var(--green); }
+  .corner.bl { bottom: 82px; left: 8px; border-bottom: 2px solid var(--green); border-left: 2px solid var(--green); }
+  .corner.br { bottom: 82px; right: 8px; border-bottom: 2px solid var(--green); border-right: 2px solid var(--green); }
+
+  /* ── COORDS BAR ── */
+  .coords-bar {
+    position: absolute;
+    top: 54px; left: 50%;
+    transform: translateX(-50%);
+    z-index: 100;
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 2px;
+    display: flex;
+    gap: 18px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 5px 14px;
+    border-radius: 0 0 6px 6px;
+    border-top: none;
+  }
+  .coords-bar span { color: var(--green); }
+
+  /* ── TOOLBAR ── */
+  .toolbar {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 8px;
+    z-index: 100;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 10px 12px;
+    border-radius: 4px;
+    box-shadow: 0 0 30px rgba(0,255,136,0.08), inset 0 0 20px rgba(0,0,0,0.5);
+    max-width: calc(100vw - 24px);
+  }
+
+  /* Toolbar top line glow */
+  .toolbar::before {
+    content: '';
+    position: absolute;
+    top: -1px; left: 10%; right: 10%;
+    height: 1px;
+    background: var(--green);
+    box-shadow: 0 0 10px var(--green);
+  }
+
+  .btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 8px 14px;
+    cursor: crosshair;
+    transition: all .15s ease;
+    color: var(--green-dim);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 1px;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+    text-transform: uppercase;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .btn::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--green-glow);
+    opacity: 0;
+    transition: opacity .15s;
+  }
+
+  .btn:hover {
+    border-color: var(--green);
+    color: var(--green);
+    box-shadow: 0 0 14px rgba(0,255,136,0.2), inset 0 0 10px rgba(0,255,136,0.05);
+    text-shadow: 0 0 8px var(--green);
+  }
+  .btn:hover::after { opacity: 1; }
+  .btn:active { transform: scale(0.97); }
+
+  .btn .icon { font-size: 16px; }
+  .btn .label { font-size: 9px; letter-spacing: 1.5px; }
+
+  @media (max-width: 399px) {
+    .toolbar { gap: 5px; padding: 8px; }
+    .btn { padding: 8px 8px; }
+    .btn .label { display: none; }
+    .btn .icon { font-size: 18px; }
+  }
+
+  /* ── PANELS ── */
+  .panel {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 18px;
+    z-index: 100;
+    display: none;
+    box-shadow: 0 0 40px rgba(0,255,136,0.1);
+    width: min(360px, calc(100vw - 24px));
+    font-family: 'Share Tech Mono', monospace;
+  }
+
+  #histPanel { bottom: 100px; animation: slideUp .2s ease; }
+  #searchModal { top: 90px; animation: slideDown .2s ease; }
+
+  @media (max-width: 399px) { #histPanel { bottom: 82px; } }
+
+  .panel.visible { display: block; }
+
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateX(-50%) translateY(10px); }
+    to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+  }
+  @keyframes slideDown {
+    from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+    to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+  }
+
+  .panel-title {
+    font-family: 'Orbitron', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--green);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 14px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    text-shadow: 0 0 8px var(--green);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 10px;
+  }
+
+  .panel-title button {
+    background: none; border: 1px solid var(--border);
+    border-radius: 3px; cursor: pointer;
+    font-size: 12px; color: var(--text-dim);
+    padding: 2px 7px; line-height: 1;
+    transition: all .15s;
+  }
+  .panel-title button:hover { color: var(--red); border-color: var(--red); }
+
+  .hist-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 6px;
+    border-bottom: 1px solid rgba(0,255,136,0.08);
+    cursor: crosshair;
+    border-radius: 3px;
+    transition: background .12s;
+    color: var(--text-dim);
+    font-size: 11px;
+  }
+  .hist-item:last-child { border-bottom: none; }
+  .hist-item:hover { background: var(--green-glow); color: var(--green); }
+  .hist-icon { font-size: 14px; flex-shrink: 0; }
+  .hist-name { font-size: 12px; color: var(--green); letter-spacing: 1px; }
+  .hist-coord { font-size: 9px; color: var(--text-dim); letter-spacing: 1px; }
+
+  /* Search */
+  .search-row { display: flex; gap: 8px; margin-bottom: 12px; }
+
+  #searchModal input {
+    flex: 1;
+    background: rgba(0,255,136,0.04);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 10px 12px;
+    font-size: 12px;
+    font-family: 'Share Tech Mono', monospace;
+    color: var(--green);
+    outline: none;
+    letter-spacing: 1px;
+    min-width: 0;
+    transition: border-color .2s;
+  }
+  #searchModal input::placeholder { color: var(--text-dim); }
+  #searchModal input:focus { border-color: var(--green); box-shadow: 0 0 10px rgba(0,255,136,0.1); }
+
+  .go-btn {
+    background: rgba(0,255,136,0.1);
+    color: var(--green);
+    border: 1px solid var(--green);
+    border-radius: 3px;
+    padding: 10px 14px;
+    font-size: 13px;
+    font-family: 'Orbitron', monospace;
+    font-weight: 700;
+    cursor: crosshair;
+    transition: all .15s;
+    flex-shrink: 0;
+    text-shadow: 0 0 6px var(--green);
+  }
+  .go-btn:hover { background: rgba(0,255,136,0.2); box-shadow: 0 0 14px rgba(0,255,136,0.2); }
+
+  .suggestion {
+    padding: 8px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    cursor: crosshair;
+    color: var(--text-dim);
+    letter-spacing: 1px;
+    transition: all .12s;
+    border-left: 2px solid transparent;
+  }
+  .suggestion:hover { background: var(--green-glow); color: var(--green); border-left-color: var(--green); }
+
+  /* ── TOAST ── */
+  .toast {
+    position: absolute;
+    top: 88px; left: 50%;
+    transform: translateX(-50%);
+    background: var(--surface);
+    border: 1px solid var(--green);
+    color: var(--green);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 2px;
+    padding: 10px 20px;
+    border-radius: 3px;
+    z-index: 2000;
+    display: none;
+    white-space: nowrap;
+    box-shadow: 0 0 20px rgba(0,255,136,0.2);
+    text-shadow: 0 0 8px var(--green);
+    max-width: calc(100vw - 32px);
+    text-align: center;
+    text-transform: uppercase;
+  }
+  .toast.show { display: block; animation: fadeToast .25s ease; }
+  @keyframes fadeToast {
+    from { opacity: 0; transform: translateX(-50%) translateY(-6px); }
+    to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+  }
+
+  /* ── Leaflet overrides ── */
+  .leaflet-control-zoom {
+    border: 1px solid var(--border) !important;
+    border-radius: 3px !important;
+    overflow: hidden;
+  }
+  .leaflet-control-zoom a {
+    background: var(--surface) !important;
+    color: var(--green) !important;
+    border-bottom: 1px solid var(--border) !important;
+    font-family: 'Orbitron', monospace !important;
+    text-shadow: 0 0 6px var(--green);
+  }
+  .leaflet-control-zoom a:hover { background: var(--green-glow) !important; }
+  .leaflet-control-attribution { display: none !important; }
+  .leaflet-popup-content-wrapper {
+    background: var(--surface) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 4px !important;
+    box-shadow: 0 0 24px rgba(0,255,136,0.15) !important;
+    color: var(--green) !important;
+    font-family: 'Share Tech Mono', monospace !important;
+    font-size: 12px !important;
+  }
+  .leaflet-popup-tip { background: #020a05 !important; }
+  .leaflet-popup-close-button { color: var(--text-dim) !important; }
+
+  @media (max-width: 600px) {
+    .leaflet-control-zoom { margin-bottom: 90px !important; }
+    .coords-bar { font-size: 9px; gap: 10px; padding: 4px 10px; }
+    .header-right .hide-sm { display: none; }
+  }
+
+  /* Typing animation for header label */
+  @keyframes typing {
+    from { width: 0; } to { width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+<div class="toast" id="toast"></div>
+
+<!-- Corner brackets -->
+<div class="corner tl"></div>
+<div class="corner tr"></div>
+<div class="corner bl"></div>
+<div class="corner br"></div>
+
+<!-- Header -->
+<div class="header">
+  <div class="logo">
+    Intelligent Octopus
+    <span>// TACTICAL MAP SYSTEM v1.0</span>
+  </div>
+  <div class="header-right">
+    <span class="hide-sm"><span class="status-dot"></span>LIVE</span>
+    <span class="hide-sm" style="color:var(--text-dim)">|</span>
+    <span class="hide-sm" style="color:var(--text-dim)">CONN: <span style="color:var(--green)">SECURE</span></span>
+    <span style="color:var(--text-dim)">|</span>
+    <span class="clock" id="clock">--:--:--</span>
+  </div>
+</div>
+
+<!-- Coords bar -->
+<div class="coords-bar">
+  LAT <span id="lat">46.6034</span> &nbsp; LNG <span id="lng">1.8883</span> &nbsp; ZOOM <span id="zoom-val">6</span>
+</div>
+
+<!-- Historique -->
+<div class="panel" id="histPanel">
+  <div class="panel-title">
+    ▶ HISTORIQUE
+    <button onclick="closePanel()">✕ FERMER</button>
+  </div>
+  <div id="histList"></div>
+</div>
+
+<!-- Recherche -->
+<div class="panel" id="searchModal">
+  <div class="panel-title">
+    ▶ RECHERCHE CIBLE
+    <button onclick="closeSearch()">✕</button>
+  </div>
+  <div class="search-row">
+    <input type="text" id="searchInput" placeholder="ENTRER UN LIEU..." />
+    <button class="go-btn" onclick="doSearch()">GO</button>
+  </div>
+  <div class="search-suggestions">
+    <div class="suggestion" onclick="flyTo(48.8584,2.2945,'Tour Eiffel')">▸ TOUR EIFFEL — PARIS</div>
+    <div class="suggestion" onclick="flyTo(43.2965,5.3698,'Marseille')">▸ MARSEILLE — FR</div>
+    <div class="suggestion" onclick="flyTo(45.7640,4.8357,'Lyon')">▸ LYON — FR</div>
+    <div class="suggestion" onclick="flyTo(43.6047,1.4442,'Toulouse')">▸ TOULOUSE — FR</div>
+    <div class="suggestion" onclick="flyTo(50.6292,3.0573,'Lille')">▸ LILLE — FR</div>
+  </div>
+</div>
+
+<!-- Toolbar -->
+<div class="toolbar">
+  <button class="btn" onclick="toggleHistory()">
+    <span class="icon">◷</span>
+    <span class="label">HISTORIQUE</span>
+  </button>
+  <button class="btn" onclick="locateMe()">
+    <span class="icon">◎</span>
+    <span class="label">POSITION</span>
+  </button>
+  <button class="btn" onclick="toggleSearch()">
+    <span class="icon">⊕</span>
+    <span class="label">RECHERCHE</span>
+  </button>
+  <button class="btn" onclick="sharePosition()">
+    <span class="icon">⇧</span>
+    <span class="label">PARTAGER</span>
+  </button>
+</div>
+
+<script>
+  // Clock
+  function updateClock() {
+    const now = new Date();
+    document.getElementById('clock').textContent =
+      now.toTimeString().slice(0,8) + ' UTC';
+  }
+  updateClock();
+  setInterval(updateClock, 1000);
+
+  // Map
+  const map = L.map('map', { zoomControl: true }).setView([46.6034, 1.8883], 6);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+
+  // Coords update
+  map.on('mousemove', e => {
+    document.getElementById('lat').textContent = e.latlng.lat.toFixed(4);
+    document.getElementById('lng').textContent = e.latlng.lng.toFixed(4);
+  });
+  map.on('zoom', () => {
+    document.getElementById('zoom-val').textContent = map.getZoom();
+  });
+
+  // History
+  const history = [];
+  let userMarker = null;
+
+  function addToHistory(name, lat, lng) {
+    history.unshift({ name, lat, lng });
+    if (history.length > 6) history.pop();
+  }
+
+  function renderHistory() {
+    const list = document.getElementById('histList');
+    if (!history.length) {
+      list.innerHTML = '<div style="color:rgba(0,255,136,0.3);font-size:11px;text-align:center;padding:16px 0;letter-spacing:2px;">// AUCUNE ENTRÉE //</div>';
+      return;
+    }
+    list.innerHTML = history.map(h =>
+      `<div class="hist-item" onclick="flyTo(${h.lat},${h.lng},'${h.name}')">
+        <span class="hist-icon">▸</span>
+        <div>
+          <div class="hist-name">${h.name.toUpperCase()}</div>
+          <div class="hist-coord">${h.lat.toFixed(5)} / ${h.lng.toFixed(5)}</div>
+        </div>
+      </div>`
+    ).join('');
+  }
+
+  // Custom marker
+  function makeMarker(lat, lng) {
+    return L.divIcon({
+      className: '',
+      html: `<div style="
+        width:16px;height:16px;
+        border:2px solid #00ff88;
+        border-radius:50%;
+        background:rgba(0,255,136,0.25);
+        box-shadow:0 0 10px #00ff88, 0 0 20px rgba(0,255,136,0.4);
+        animation:pulse 1.8s infinite;
+      "></div>
+      <style>@keyframes pulse{0%,100%{box-shadow:0 0 10px #00ff88,0 0 20px rgba(0,255,136,.4)}50%{box-shadow:0 0 18px #00ff88,0 0 36px rgba(0,255,136,.6)}}</style>`,
+      iconSize: [16, 16],
+      iconAnchor: [8, 8]
+    });
+  }
+
+  function flyTo(lat, lng, name) {
+    closePanel(); closeSearch();
+    map.flyTo([lat, lng], 14, { duration: 1.2 });
+    addToHistory(name, lat, lng);
+    setTimeout(() => {
+      L.marker([lat, lng], { icon: makeMarker(lat, lng) })
+        .addTo(map)
+        .bindPopup(`<strong style="letter-spacing:2px;text-transform:uppercase">${name}</strong><br><span style="color:rgba(0,255,136,0.6);font-size:10px">${lat.toFixed(5)} / ${lng.toFixed(5)}</span>`)
+        .openPopup();
+    }, 800);
+  }
+
+  function locateMe() {
+    showToast('▶ LOCALISATION EN COURS...');
+    map.locate({ setView: true, maxZoom: 15 });
+  }
+
+  map.on('locationfound', e => {
+    if (userMarker) map.removeLayer(userMarker);
+    userMarker = L.marker(e.latlng, { icon: makeMarker(e.latlng.lat, e.latlng.lng) })
+      .addTo(map)
+      .bindPopup('<strong style="letter-spacing:2px">▸ VOUS ÊTES ICI</strong>')
+      .openPopup();
+    addToHistory('MA POSITION', e.latlng.lat, e.latlng.lng);
+    showToast('✓ POSITION ACQUISE');
+  });
+  map.on('locationerror', () => showToast('✗ GÉOLOCALISATION INDISPONIBLE'));
+
+  function sharePosition() {
+    const c = map.getCenter();
+    const url = `https://www.google.com/maps?q=${c.lat.toFixed(5)},${c.lng.toFixed(5)}`;
+    if (navigator.share) {
+      navigator.share({ title: 'Intelligent Octopus — Position', url });
+    } else {
+      navigator.clipboard?.writeText(url)
+        .then(() => showToast('▶ LIEN COPIÉ'))
+        .catch(() => showToast(url));
+    }
+  }
+
+  function doSearch() {
+    const q = document.getElementById('searchInput').value.trim();
+    if (!q) return;
+    showToast('▶ RECHERCHE EN COURS...');
+    fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=1`)
+      .then(r => r.json())
+      .then(data => {
+        if (!data.length) { showToast('✗ CIBLE INTROUVABLE'); return; }
+        const { lat, lon, display_name } = data[0];
+        flyTo(parseFloat(lat), parseFloat(lon), display_name.split(',')[0]);
+        document.getElementById('searchInput').value = '';
+      })
+      .catch(() => showToast('✗ ERREUR RÉSEAU'));
+  }
+
+  document.getElementById('searchInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') doSearch();
+  });
+
+  function toggleHistory() {
+    closeSearch();
+    renderHistory();
+    document.getElementById('histPanel').classList.toggle('visible');
+  }
+
+  function toggleSearch() {
+    closePanel();
+    document.getElementById('searchModal').classList.toggle('visible');
+    if (document.getElementById('searchModal').classList.contains('visible'))
+      setTimeout(() => document.getElementById('searchInput').focus(), 50);
+  }
+
+  function closePanel() { document.getElementById('histPanel').classList.remove('visible'); }
+  function closeSearch() { document.getElementById('searchModal').classList.remove('visible'); }
+
+  map.on('click', () => { closePanel(); closeSearch(); });
+
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(t._timer);
+    t._timer = setTimeout(() => t.classList.remove('show'), 2600);
+  }
+</script>
+</body>
+</html>
